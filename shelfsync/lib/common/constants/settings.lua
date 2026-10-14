@@ -96,4 +96,26 @@ Settings.PAGEBOUND = {
   PASSWORD_PLAIN = "password_plain",
 }
 
+Settings.LIBRARYTHING = {
+  -- The session cookies (cookie_userid/cookie_usernum/cookie_userchecksum)
+  -- of a browser signed in to librarything.com, as one Cookie header value.
+  -- The plugin can't sign in itself (see librarything/api.lua).
+  SESSION_COOKIE = "session_cookie",
+  USERNAME = "username",
+  -- Collection key (see librarything/constants.lua) -> the account's id.
+  COLLECTION_IDS = "collection_ids",
+  -- Every collection of the account, { { id, name }, ... } in its order,
+  -- as last seen on LibraryThing.
+  COLLECTIONS = "collections",
+  -- { id, name } of the collection a finished book is put in; Your library
+  -- when unset.
+  READ_COLLECTION = "read_collection",
+  -- Work id -> { title, author, copy }, for looking up the user's copy of a
+  -- linked work (see librarything/api.lua's findUserBook).
+  WORKS = "works",
+  -- LibraryThing's own site session (LTAnonSessionID), which it sets on
+  -- any visitor and its search needs.
+  SITE_SESSION = "site_session",
+}
+
 return Settings

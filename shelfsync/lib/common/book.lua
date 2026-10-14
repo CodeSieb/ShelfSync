@@ -61,7 +61,15 @@ function Book:parseIdentifiers(identifiers)
       result.storygraph_slug = sg
     end
 
-    if not hc and not hc_edition and not sg and not sg_edition and not gr then
+    -- A LibraryThing work id, as librarything.com/work/<id> -- consumed
+    -- only by LibraryThingApi:findBookByIdentifiers.
+    local lt = string.match(line, "librarything:(%d+)") or
+               string.match(line, "librarything%-work:(%d+)")
+    if lt then
+      result.librarything_id = lt
+    end
+
+    if not hc and not hc_edition and not sg and not sg_edition and not gr and not lt then
       -- strip prefix
       local str = string.gsub(line, "^[^%s]+%s*:%s*", "")
       str = string.gsub(str, "-", "")

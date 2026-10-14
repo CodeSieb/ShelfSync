@@ -5,27 +5,32 @@ local HardcoverApi = require("shelfsync/lib/hardcover/api")
 local GoodreadsApi = require("shelfsync/lib/goodreads/api")
 local FableApi = require("shelfsync/lib/fable/api")
 local PageboundApi = require("shelfsync/lib/pagebound/api")
+local LibraryThingApi = require("shelfsync/lib/librarything/api")
 local StoryGraph = require("shelfsync/lib/storygraph/provider")
 local Hardcover = require("shelfsync/lib/hardcover/provider")
 local Goodreads = require("shelfsync/lib/goodreads/provider")
 local Fable = require("shelfsync/lib/fable/provider")
 local Pagebound = require("shelfsync/lib/pagebound/provider")
+local LibraryThing = require("shelfsync/lib/librarything/provider")
 local StoryGraphSettings = require("shelfsync/lib/storygraph/settings")
 local HardcoverSettings = require("shelfsync/lib/hardcover/settings")
 local GoodreadsSettings = require("shelfsync/lib/goodreads/settings")
 local FableSettings = require("shelfsync/lib/fable/settings")
 local PageboundSettings = require("shelfsync/lib/pagebound/settings")
+local LibraryThingSettings = require("shelfsync/lib/librarything/settings")
 local StoryGraphMenu = require("shelfsync/lib/storygraph/menu")
 local HardcoverMenu = require("shelfsync/lib/hardcover/menu")
 local GoodreadsMenu = require("shelfsync/lib/goodreads/menu")
 local FableMenu = require("shelfsync/lib/fable/menu")
 local PageboundMenu = require("shelfsync/lib/pagebound/menu")
+local LibraryThingMenu = require("shelfsync/lib/librarything/menu")
 
 local STORYGRAPH = require("shelfsync/lib/storygraph/constants")
 local HARDCOVER = require("shelfsync/lib/hardcover/constants")
 local GOODREADS = require("shelfsync/lib/goodreads/constants")
 local FABLE = require("shelfsync/lib/fable/constants")
 local PAGEBOUND = require("shelfsync/lib/pagebound/constants")
+local LIBRARYTHING = require("shelfsync/lib/librarything/constants")
 local SETTING = require("shelfsync/lib/common/constants/settings")
 
 -- Per-provider wiring for ShelfSyncApp: the classes/constants each engine is
@@ -135,6 +140,25 @@ To fix it:
 Open ShelfSync > Providers > Pagebound > Account and log in again with your Pagebound email and password.
 
 Re-enable syncing afterwards from the Pagebound menu.]]),
+  },
+  {
+    key = "librarything",
+    prefix = "LibraryThing",
+    label = "LibraryThing",
+    constants = LIBRARYTHING,
+    api = LibraryThingApi,
+    provider_class = LibraryThing,
+    settings_class = LibraryThingSettings,
+    settings_filename = "librarythingsync_settings.lua",
+    menu_class = LibraryThingMenu,
+    highlight_menu_name = "13_5_make_librarything_highlight_item",
+    auth_setting_key = SETTING.LIBRARYTHING.SESSION_COOKIE,
+    auth_help_text = _([[Your LibraryThing session has expired or is invalid. Syncing is paused.
+
+To fix it:
+Sign in to librarything.com in a browser, then enter its session cookies again under ShelfSync > Providers > LibraryThing > Account > Session cookies (or in shelfsync_config.lua).
+
+Re-enable syncing afterwards from the LibraryThing menu.]]),
   },
 }
 

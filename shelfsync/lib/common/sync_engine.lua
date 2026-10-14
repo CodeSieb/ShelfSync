@@ -468,6 +468,11 @@ function SyncEngine:_handlePageUpdate(filename, value, immediate, callback, upda
     return bail(_("Sync is disabled for this book"))
   end
 
+  if not self.provider:sendsProgress(value, update_type, filename) then
+    self.settings:debugLog(self.label .. ": _handlePageUpdate - nothing to send for this progress, skipping")
+    return bail(_(self.label .. " doesn't keep reading progress"))
+  end
+
   if self.state.book_status.status_id ~= self.constants.STATUS.READING then
     logger.info(self.label .. ": Skipping page update - status_id is " .. tostring(self.state.book_status.status_id) .. ", not READING")
     self:warnStatusMismatch(filename)
@@ -855,6 +860,9 @@ function SyncEngine:_queueClosingProgress()
     value, update_type = unsent.value, unsent.update_type
   end
 
+  if not self.provider:sendsProgress(value, update_type, filename) then
+    return
+  end
   self.settings.pending_updates:addProgress(filename, book, value, update_type)
 end
 
@@ -1418,6 +1426,11 @@ function SyncEngine:registerHighlight()
   end
 
   self.ui.highlight:removeFromHighlightDialog(self.highlight_menu_name)
+
+  -- Providers with nowhere to send a note (LibraryThing) get no menu item.
+  if self.provider.supports_notes == false then
+    return
+  end
 
   if self.settings:bookLinked() and not self:isWikipediaDocument() then
     self.ui.highlight:addToHighlightDialog(self.highlight_menu_name, function(this)
