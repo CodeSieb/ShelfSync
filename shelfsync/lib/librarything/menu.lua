@@ -304,17 +304,68 @@ end
 function LibraryThingMenu:getAuthSubMenuItems()
   return {
     {
-      text = _("How to get your session cookies"),
+      text = _("Sign in with LibraryThing"),
+      help_text = _("Sign in with your LibraryThing username and password. ShelfSync caches your password to sign in again if the session expires, encrypted at rest when possible. The unofficial endpoint may change, and the password is sent in an HTTPS URL."),
+      keep_menu_open = true,
+      callback = function(menu_instance)
+        local MultiInputDialog = require("ui/widget/multiinputdialog")
+        local dialog
+        dialog = MultiInputDialog:new {
+          title = _("LibraryThing Sign In"),
+          fields = {
+            { text = self.api:username() or "", hint = _("Username") },
+            { text = "", hint = _("Password"), text_type = "password" },
+          },
+          buttons = {
+            {
+              {
+                text = _("Cancel"),
+                callback = function() UIManager:close(dialog) end,
+              },
+              {
+                text = _("Sign in"),
+                callback = function()
+                  local fields = dialog:getFields()
+                  local username, password = fields[1], fields[2]
+                  UIManager:close(dialog)
+
+                  Trapper:wrap(function()
+                    local info = InfoMessage:new { text = _("Signing in to LibraryThing...") }
+                    UIManager:show(info)
+                    local ok, err = self.api:login(username, password)
+                    UIManager:close(info)
+                    if ok then
+                      menu_instance:updateItems()
+                      UIManager:show(InfoMessage:new { text = _("Signed in to LibraryThing") })
+                    else
+                      UIManager:show(InfoMessage:new {
+                        text = _("LibraryThing sign-in failed: ") .. tostring(err or _("unknown error")),
+                        icon = "notice-warning",
+                      })
+                    end
+                  end)
+                end,
+              },
+            },
+          },
+        }
+        UIManager:show(dialog)
+        dialog:onShowKeyboard()
+      end,
+      separator = true,
+    },
+    {
+      text = _("How to sign in"),
       keep_menu_open = true,
       callback = function()
         UIManager:show(InfoMessage:new {
-          text = _([[ShelfSync uses the session of a browser you're signed in to librarything.com with, as signing in from anywhere else ends on LibraryThing's "Are you a robot?" page. Only three of its cookies are needed: cookie_userid, cookie_usernum and cookie_userchecksum.
+          text = _([[Sign in with your LibraryThing username and password, or use the session cookies from a browser signed in to librarything.com. ShelfSync caches your password to sign in again if the session expires, encrypted at rest when possible. Sign-in sends it in an HTTPS URL. Log out clears the cached password.
 
-Sign in to librarything.com in a browser on your computer, then either:
+Only three cookies are needed: cookie_userid, cookie_usernum and cookie_userchecksum. To copy them from a browser:
 - run the fetch-cookies helper from ShelfSync's releases with "--service librarything", and copy the shelfsync_config.lua it writes into the plugin's folder, or
 - open the browser's dev tools (F12) > Application/Storage > Cookies > www.librarything.com, and enter the three under "Session cookies" as cookie_userid=...; cookie_usernum=...; cookie_userchecksum=...
 
-The session lasts until you sign out of LibraryThing in that browser.
+The sign-in endpoint is unofficial and may change.
 
 librarything.com is protected by Cloudflare, which can ask a browser to prove it isn't a bot. ShelfSync can't do that, so if Cloudflare challenges it, syncing fails until Cloudflare lets it through again. "Test connection" shows whether that's happening.]]),
         })

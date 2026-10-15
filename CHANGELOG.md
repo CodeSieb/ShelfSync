@@ -3,7 +3,7 @@
 <!-- Prefix each entry with (feat) or (fix); list features first and fixes last. -->
 
 ## Unreleased
-- (feat) 🌟 Add LibraryThing sync: sign-in with a browser's LibraryThing session cookies (which the cookie helper can now fetch with `--service librarything`), book linking (adding the book to your library if needed), Currently reading / To read / Read status through LibraryThing's collections and reading dates, the finished date when a book is finished, a choice of which collection read books go to (Your library by default), and ratings and reviews. LibraryThing has no reading progress, so none is sent. 🌟
+- (feat) 🌟 Add LibraryThing sync: sign in with a username and password or browser session cookies (which the cookie helper can fetch with `--service librarything`), link books (adding one to your library if needed), sync Currently reading / To read / Read through LibraryThing's collections and reading dates, set the finished date, choose which collection read books go to (Your library by default), and save ratings and reviews. LibraryThing has no reading progress, so none is sent. 🌟
 - (fix) Say why "Link book" couldn't search (e.g. no network), instead of doing nothing (all providers).
 
 ## 1.7.0

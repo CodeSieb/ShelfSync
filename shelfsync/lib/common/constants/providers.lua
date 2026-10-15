@@ -156,7 +156,7 @@ Re-enable syncing afterwards from the Pagebound menu.]]),
     auth_help_text = _([[Your LibraryThing session has expired or is invalid. Syncing is paused.
 
 To fix it:
-Sign in to librarything.com in a browser, then enter its session cookies again under ShelfSync > Providers > LibraryThing > Account > Session cookies (or in shelfsync_config.lua).
+Use ShelfSync > Providers > LibraryThing > Account > Sign in with LibraryThing, or enter its session cookies under Account > Session cookies (or in shelfsync_config.lua).
 
 Re-enable syncing afterwards from the LibraryThing menu.]]),
   },

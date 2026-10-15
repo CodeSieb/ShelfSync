@@ -97,11 +97,12 @@ Settings.PAGEBOUND = {
 }
 
 Settings.LIBRARYTHING = {
-  -- The session cookies (cookie_userid/cookie_usernum/cookie_userchecksum)
-  -- of a browser signed in to librarything.com, as one Cookie header value.
-  -- The plugin can't sign in itself (see librarything/api.lua).
+  -- LibraryThing's session cookies (cookie_userid/cookie_usernum/
+  -- cookie_userchecksum), from username/password sign-in or a browser Cookie header.
   SESSION_COOKIE = "session_cookie",
   USERNAME = "username",
+  PASSWORD_ENC = "password_enc",
+  PASSWORD_PLAIN = "password_plain",
   -- Collection key (see librarything/constants.lua) -> the account's id.
   COLLECTION_IDS = "collection_ids",
   -- Every collection of the account, { { id, name }, ... } in its order,

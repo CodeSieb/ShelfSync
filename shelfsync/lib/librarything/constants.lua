@@ -45,8 +45,8 @@ local LibraryThing = {
     { id = 5, name = "Read but unowned" },
     { id = 6, name = "Favorites" },
   },
-  -- LibraryThing's session cookies, the only ones kept from what's pasted
-  -- or put in shelfsync_config.lua.
+  -- The three LibraryThing session cookies accepted by Android sign-in and
+  -- by the website's account requests.
   SESSION_COOKIES = { "cookie_userid", "cookie_usernum", "cookie_userchecksum" },
 }
 

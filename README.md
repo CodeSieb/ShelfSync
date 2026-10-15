@@ -18,12 +18,12 @@ A KOReader plugin to synchronize your reading progress, notes, and status to [Th
 1. Download the latest release and extract it to your KOReader `plugins/` folder.
 2. Set up authentication for whichever service(s) you want to use — all are optional and independent.
 
-Rename `shelfsync_config.example.lua` to `shelfsync_config.lua`. Its `storygraph`, `hardcover`, and `goodreads` sections are optional; leave unused sections blank or omit the file. Set up Fable, Pagebound, and LibraryThing in KOReader. On upgrade, existing `storygraph_config.lua` and `hardcover_config.lua` files are merged automatically.
+Rename `shelfsync_config.example.lua` to `shelfsync_config.lua`. Its `storygraph`, `hardcover`, and `goodreads` sections are optional; leave unused sections blank or omit the file. Sign in to StoryGraph and LibraryThing from KOReader with your account credentials. Fable and Pagebound can also be set up there.
 
 > [!TIP]
-> The StoryGraph and Goodreads cookies below can be grabbed automatically instead of copying them out of devtools by hand:
+> The StoryGraph, Goodreads, and LibraryThing cookies below can be grabbed automatically instead of copying them out of devtools by hand:
 >
-> 1. Log in to StoryGraph and/or Goodreads in a browser on this PC — the script only reads cookies that already exist, it can't log in for you.
+> 1. Log in to StoryGraph, Goodreads, and/or LibraryThing in a browser on this PC — the script only reads cookies that already exist, it can't log in for you.
 > 2. Download `shelfsync-fetch-cookies.zip` from the [latest release](/releases/latest), extract it, and run `fetch-cookies.sh` (macOS/Linux) or `fetch-cookies.bat` (Windows). Needs Python 3; it'll use [uv](https://docs.astral.sh/uv/) if you have it to grab `browser_cookie3` automatically, otherwise `pip install browser_cookie3==0.20.1` first.
 > 3. It writes the cookies straight into `shelfsync_config.lua` — nothing is sent anywhere else. Use `--help` for options like `--browser firefox`.
 >
@@ -38,7 +38,7 @@ Rename `shelfsync_config.example.lua` to `shelfsync_config.lua`. Its `storygraph
 | [Goodreads](#goodreads-authentication) | Browser session cookie, or the optional self-hosted cookie refresher |
 | [Fable](#fable-authentication) | Email and password in KOReader |
 | [Pagebound](#pagebound-authentication) | Email and password in KOReader |
-| [LibraryThing](#librarything-authentication) | Browser session cookies (three values), via the cookie helper, `shelfsync_config.lua`, or KOReader |
+| [LibraryThing](#librarything-authentication) | Username/password sign-in, or browser session cookies |
 
 ### StoryGraph authentication
 Open **ShelfSync > Providers > StoryGraph > Account (Cookies & Tokens) > Log in** and enter your StoryGraph email and password. The plugin saves the session and remember-me cookies returned by StoryGraph; it does not store your password. Log in again if your session expires.
@@ -87,7 +87,11 @@ Open **ShelfSync > Providers > Pagebound > Account > Log in** and enter your Pag
 > If you usually sign in to Pagebound with **Google or Apple**, reset the password for the email address on your account through Pagebound. You can then log in with that email and password; ShelfSync uses this regular email/password account.
 
 ### LibraryThing authentication
-LibraryThing asks anything signing in outside a browser to pass its "Are you a robot?" page, so ShelfSync uses the session of a browser you're signed in with instead. Only three of its cookies are needed: `cookie_userid`, `cookie_usernum`, and `cookie_userchecksum`; the session lasts until you sign out in that browser.
+To connect, open **ShelfSync > Providers > LibraryThing > Account > Sign in with LibraryThing** and enter your username and password. ShelfSync saves your session and password so it can sign you back in if the session expires. It encrypts the saved password when your device supports it; otherwise, it is stored unencrypted. **Log out** clears both.
+
+The sign-in method is unofficial and may change. Your password is sent in the sign-in web address over HTTPS, and that address may be recorded in logs.
+
+If you prefer not to enter your password in ShelfSync, use browser cookies instead:
 
 1. Sign in to [librarything.com](https://www.librarything.com) in a browser on your computer.
 2. Run the cookie helper above with `--service librarything` (`fetch-cookies.sh --service librarything` or `fetch-cookies.bat --service librarything`). It writes only those three cookies into the `librarything` section of `shelfsync_config.lua`; copy that file into the plugin's folder on your e-reader. This avoids typing them on an e-reader keyboard.

@@ -2,9 +2,9 @@
 -- are read-only and need a developer key), so like StoryGraph and Goodreads
 -- this replays the requests librarything.com's own pages make, signed in
 -- with the account's session cookies. None of them need a CSRF token.
--- Those cookies come from a browser the user signed in with: signing in
--- from anywhere else ends on LibraryThing's "Are you a robot?" page, which
--- the plugin doesn't attempt.
+-- Users can paste those cookies from a browser, or get them from the
+-- private username/password sign-in endpoint. It sends the password in a GET
+-- URL; ShelfSync encrypts the saved password when possible for reauthentication.
 --
 -- LibraryThing tracks books differently from the other providers:
 --
@@ -31,6 +31,7 @@ local config = (config_ok and type(shelfsync_config) == "table" and shelfsync_co
 local logger = require("shelfsync/lib/common/safe_logger")
 local http = require("socket.http")
 local ltn12 = require("ltn12")
+local json = require("json")
 local T = require("ffi/util").template
 local Trapper = require("ui/trapper")
 local NetworkManager = require("ui/network/manager")
@@ -39,10 +40,16 @@ local socketutil = require("socketutil")
 local VERSION = require("shelfsync_version")
 local SETTING = require("shelfsync/lib/common/constants/settings")
 local LIBRARYTHING = require("shelfsync/lib/librarything/constants")
+local CryptoUtil = require("shelfsync/lib/common/crypto_util")
 
 local BASE_URL = LIBRARYTHING.BASE_URL
 local STATUS = LIBRARYTHING.STATUS
 local COLLECTION = LIBRARYTHING.COLLECTION
+
+local APP_AUTH_URL = "https://api4.librarything.com"
+local APP_TOKEN = "687aa7458d1ae63c50e1e32887e4d40b"
+local APP_DIRECT_SIGNIN = "e038a6205d72c98c68e0afa670d0199c"
+local APP_USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 16; 23090RA98G Build/BP2A.250605.031.A3)"
 
 local CHALLENGE_ERROR = "LibraryThing's Cloudflare protection blocked the request with a browser check. ShelfSync can't complete those, so try again later."
 
@@ -215,6 +222,85 @@ function LibraryThingApi:saveSessionCookie(header)
     return false
   end
   self:_saveSession(jar)
+  -- Browser cookies don't include credentials ShelfSync can use to renew them.
+  self.settings:updateSetting(SETTING.LIBRARYTHING.PASSWORD_ENC, "")
+  self.settings:updateSetting(SETTING.LIBRARYTHING.PASSWORD_PLAIN, "")
+  return true
+end
+
+local function stored_password(settings)
+  if not settings then return nil end
+  local encrypted = settings:readSetting(SETTING.LIBRARYTHING.PASSWORD_ENC)
+  if encrypted and encrypted ~= "" then
+    return CryptoUtil.decryptSecret(encrypted)
+  end
+  local plain = settings:readSetting(SETTING.LIBRARYTHING.PASSWORD_PLAIN)
+  if plain and plain ~= "" then return plain end
+  return nil
+end
+
+local function save_password(settings, password)
+  if not settings then return end
+  local encrypted = CryptoUtil.encryptSecret(password)
+  if encrypted then
+    settings:updateSetting(SETTING.LIBRARYTHING.PASSWORD_ENC, encrypted)
+    settings:updateSetting(SETTING.LIBRARYTHING.PASSWORD_PLAIN, "")
+  else
+    settings:updateSetting(SETTING.LIBRARYTHING.PASSWORD_ENC, "")
+    settings:updateSetting(SETTING.LIBRARYTHING.PASSWORD_PLAIN, password)
+  end
+end
+
+local function valid_session_cookie(value)
+  return type(value) == "string" and value ~= "" and value ~= "deleted"
+    and not value:find("[,;%c]")
+end
+
+-- The sign-in endpoint returns the three cookies this provider uses for
+-- website requests. The password is cached for reauthentication if they expire.
+function LibraryThingApi:login(username, password)
+  if not NetworkManager:isConnected() then
+    return nil, "Network not connected"
+  end
+  if type(username) ~= "string" or username == "" or type(password) ~= "string" or password == "" then
+    return nil, "Username and password are required"
+  end
+
+  local path = "/app_authorize.php?" .. form_encode({
+    { "v", 2 },
+    { "app_token", APP_TOKEN },
+    { "auth_username", username },
+    { "auth_password", password },
+    { "direct_signin", APP_DIRECT_SIGNIN },
+  })
+  local code, body = self:request(path, {
+    base_url = APP_AUTH_URL,
+    accept = "application/json",
+    user_agent = APP_USER_AGENT,
+    no_cookies = true,
+  })
+  if not code then
+    if body == "Network not connected" or body == CHALLENGE_ERROR then return nil, body end
+    return nil, "Could not contact LibraryThing sign-in"
+  end
+  if code ~= 200 then
+    return nil, "LibraryThing sign-in failed (HTTP " .. tostring(code) .. ")"
+  end
+
+  local ok, result = pcall(json.decode, body)
+  local data = ok and type(result) == "table" and result.data
+  if type(data) ~= "table" or not valid_session_cookie(data.cookie_userid)
+      or not valid_session_cookie(data.cookie_usernum) or not valid_session_cookie(data.cookie_userchecksum) then
+    return nil, "LibraryThing returned an incomplete sign-in response"
+  end
+
+  local cookie = "cookie_userid=" .. data.cookie_userid
+    .. "; cookie_usernum=" .. data.cookie_usernum
+    .. "; cookie_userchecksum=" .. data.cookie_userchecksum
+  if not self:saveSessionCookie(cookie) then
+    return nil, "LibraryThing returned invalid session cookies"
+  end
+  save_password(self.settings, password)
   return true
 end
 
@@ -245,6 +331,8 @@ function LibraryThingApi:logout()
   self:_forgetAccountIds()
   self.settings:updateSetting(SETTING.LIBRARYTHING.SESSION_COOKIE, "")
   self.settings:updateSetting(SETTING.LIBRARYTHING.USERNAME, "")
+  self.settings:updateSetting(SETTING.LIBRARYTHING.PASSWORD_ENC, "")
+  self.settings:updateSetting(SETTING.LIBRARYTHING.PASSWORD_PLAIN, "")
   self.settings:updateSetting(SETTING.USER_ID, nil)
 end
 
@@ -351,24 +439,29 @@ end
 --   ajax:    sent as XMLHttpRequest, as the site's own scripts do
 --   extract: run on a 200 response's body inside the subprocess, so a whole
 --            page doesn't have to be passed back (or kept) to read part of it
+--   base_url/user_agent/accept: override for the Android app sign-in request
+--   no_cookies: don't send or save cookies for that request
 --   timeout/maxtime: seconds, for LuaSocket
-function LibraryThingApi:request(path, opts)
+function LibraryThingApi:request(path, opts, auth_retried)
   opts = opts or {}
   if not self.enabled or not NetworkManager:isConnected() then
     return nil, "Network not connected"
   end
 
-  local cookie = self:sessionCookie()
-  local site_session = self:_siteSessionCookie()
-  if site_session then
-    cookie = cookie ~= "" and (cookie .. "; " .. site_session) or site_session
+  local cookie = ""
+  if not opts.no_cookies then
+    cookie = self:sessionCookie()
+    local site_session = self:_siteSessionCookie()
+    if site_session then
+      cookie = cookie ~= "" and (cookie .. "; " .. site_session) or site_session
+    end
   end
   local body = opts.form and form_encode(opts.form) or nil
   local method = opts.method or (body and "POST" or "GET")
-  local url = BASE_URL .. path
+  local url = (opts.base_url or BASE_URL) .. path
   local headers = {
-    ["User-Agent"] = T("ShelfSync/%1 (KOReader plugin; +https://github.com/Lyfts/ShelfSync)", table.concat(VERSION, ".")),
-    ["Accept"] = opts.ajax and "*/*" or "text/html,application/xhtml+xml",
+    ["User-Agent"] = opts.user_agent or T("ShelfSync/%1 (KOReader plugin; +https://github.com/Lyfts/ShelfSync)", table.concat(VERSION, ".")),
+    ["Accept"] = opts.accept or (opts.ajax and "*/*" or "text/html,application/xhtml+xml"),
     ["Accept-Language"] = "en",
   }
   if cookie ~= "" then headers["Cookie"] = cookie end
@@ -421,12 +514,14 @@ function LibraryThingApi:request(path, opts)
     return nil, "Invalid response from LibraryThing"
   end
   if code == "error" then
-    logger.warn("LibraryThing: request failed: " .. tostring(response))
+    logger.warn("LibraryThing: request failed: " .. (opts.no_cookies and path:match("^[^?]*") or tostring(response)))
     return nil, response ~= "" and response or "Request failed"
   end
 
   local logged_path = path:match("^[^?]*")
-  response_headers.new_site_session = self:_keepSiteSession(response_headers["set-cookie"])
+  if not opts.no_cookies then
+    response_headers.new_site_session = self:_keepSiteSession(response_headers["set-cookie"])
+  end
   if is_challenge(code, response_headers, response) then
     logger.warn("LibraryThing: " .. method .. " " .. logged_path .. " got a Cloudflare challenge (HTTP " .. tostring(code) .. ")")
     return nil, CHALLENGE_ERROR, response_headers
@@ -436,7 +531,17 @@ function LibraryThingApi:request(path, opts)
     self.settings:debugLog("LibraryThing: " .. method .. " " .. logged_path .. " -> HTTP " .. tostring(code))
   end
 
-  if (code == 301 or code == 302 or code == 303) and is_sign_in_redirect(response_headers.location) then
+  local sign_in_redirect = (code == 301 or code == 302 or code == 303)
+    and is_sign_in_redirect(response_headers.location)
+  local signed_out_page = code == 200 and type(response) == "string"
+    and response:find("LibraryThing%.is_signed_in%s*=%s*0") ~= nil
+  if not opts.no_cookies and (code == 401 or sign_in_redirect or signed_out_page) then
+    if not auth_retried then
+      local username, password = self:username(), stored_password(self.settings)
+      if username and password and self:login(username, password) then
+        return self:request(path, opts, true)
+      end
+    end
     self:notifyAuthFailure()
     return nil, "Unauthorized", response_headers
   end

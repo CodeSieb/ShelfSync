@@ -4,6 +4,7 @@ local Api = require("shelfsync/lib/librarything/api")
 local Book = require("shelfsync/lib/common/book")
 local LIBRARYTHING = require("shelfsync/lib/librarything/constants")
 local SETTING = require("shelfsync/lib/common/constants/settings")
+local json = require("json")
 local http = require("socket.http")
 local ltn12 = require("ltn12")
 local socketutil = require("socketutil")
@@ -221,16 +222,65 @@ describe("LibraryThing transport", function()
 
   after_each(function()
     mock.revert(NetworkManager); mock.revert(Trapper); mock.revert(socketutil)
-    mock.revert(ltn12.source); mock.revert(http)
+    mock.revert(ltn12.source); mock.revert(http); mock.revert(json)
   end)
 
   it("saves the session cookies from a pasted Cookie header, and only those", function()
+    values[SETTING.LIBRARYTHING.PASSWORD_ENC] = "old-ciphertext"
+    values[SETTING.LIBRARYTHING.PASSWORD_PLAIN] = "old-password"
     assert.is_true(api:saveSessionCookie(" cookie_userid=Reader; cf_clearance=xyz; cookie_usernum=1234567;"
       .. " cookie_userchecksum=abc; LTAnonSessionID=1 "))
     assert.equals("cookie_userid=Reader; cookie_usernum=1234567; cookie_userchecksum=abc", values[SETTING.LIBRARYTHING.SESSION_COOKIE])
     assert.equals("Reader", api:username())
     assert.equals("1234567", values[SETTING.USER_ID])
+    assert.equals("", values[SETTING.LIBRARYTHING.PASSWORD_ENC])
+    assert.equals("", values[SETTING.LIBRARYTHING.PASSWORD_PLAIN])
     assert.is_true(api:hasCredential())
+  end)
+
+  it("gets website session cookies through Android sign-in without sending stored cookies", function()
+    values[SETTING.LIBRARYTHING.SESSION_COOKIE] = "cookie_userid=Old; cookie_usernum=1; cookie_userchecksum=old"
+    stub(json, "decode", function() return { data = {
+      cookie_userid = "Reader", cookie_usernum = "1234567", cookie_userchecksum = "abc",
+      auth_token = "app-token", auth_checksum = "app-checksum",
+    } } end)
+    responses[1] = { 200, "{}", { ["set-cookie"] = "LTAnonSessionID=api-session; path=/" } }
+
+    assert.is_true(api:login("Reader", "test pass"))
+    assert.equals("https://api4.librarything.com", requests[1].url:match("^https://[^/]+"))
+    assert.matches("/app_authorize.php%?", requests[1].url)
+    assert.matches("auth_username=Reader", requests[1].url)
+    assert.matches("auth_password=test%+pass", requests[1].url)
+    assert.matches("^Dalvik/2.1.0", requests[1].headers["User-Agent"])
+    assert.is_nil(requests[1].headers.Cookie)
+    assert.is_nil(values[SETTING.LIBRARYTHING.SITE_SESSION])
+    assert.equals("cookie_userid=Reader; cookie_usernum=1234567; cookie_userchecksum=abc",
+      values[SETTING.LIBRARYTHING.SESSION_COOKIE])
+    assert.equals("Reader", values[SETTING.LIBRARYTHING.USERNAME])
+    assert.equals("1234567", values[SETTING.USER_ID])
+    assert.is_true((values[SETTING.LIBRARYTHING.PASSWORD_ENC] ~= ""
+      and values[SETTING.LIBRARYTHING.PASSWORD_PLAIN] == "")
+      or (values[SETTING.LIBRARYTHING.PASSWORD_ENC] == ""
+        and values[SETTING.LIBRARYTHING.PASSWORD_PLAIN] == "test pass"))
+    for key, value in pairs(values) do
+      if key ~= SETTING.LIBRARYTHING.PASSWORD_PLAIN then
+        assert.is_false(type(value) == "string" and value:find("test pass", 1, true) ~= nil)
+      end
+    end
+  end)
+
+  it("doesn't replace a saved session when Android sign-in omits a cookie", function()
+    local old_session = "cookie_userid=Reader; cookie_usernum=1; cookie_userchecksum=old"
+    values[SETTING.LIBRARYTHING.SESSION_COOKIE] = old_session
+    stub(json, "decode", function() return { data = {
+      cookie_userid = "Other", cookie_usernum = "2", cookie_userchecksum = "bad;value",
+    } } end)
+    responses[1] = { 200, "{}" }
+
+    local ok, err = api:login("Other", "test pass")
+    assert.is_nil(ok)
+    assert.equals("LibraryThing returned an incomplete sign-in response", err)
+    assert.equals(old_session, values[SETTING.LIBRARYTHING.SESSION_COOKIE])
   end)
 
   it("searches again with the site session LibraryThing sets, and keeps it", function()
@@ -313,6 +363,59 @@ describe("LibraryThing transport", function()
     assert.equals(1, failures)
     assert.equals("cookie_userid=Reader; cookie_usernum=1; cookie_userchecksum=abc", requests[1].headers.Cookie)
     assert.equals("https://www.librarything.com/work/1", requests[1].url)
+  end)
+
+  it("re-authenticates and retries a request after a sign-in redirect", function()
+    values[SETTING.LIBRARYTHING.SESSION_COOKIE] = "cookie_userid=Reader; cookie_usernum=1; cookie_userchecksum=old"
+    values[SETTING.LIBRARYTHING.PASSWORD_PLAIN] = "test pass"
+    stub(json, "decode", function() return { data = {
+      cookie_userid = "Reader", cookie_usernum = "1234567", cookie_userchecksum = "fresh",
+    } } end)
+    responses[1] = { 302, "", { location = "/signin" } }
+    responses[2] = { 200, "{}" }
+    responses[3] = { 200, "retried" }
+
+    local code, body = api:request("/work/1")
+
+    assert.equals(200, code)
+    assert.equals("retried", body)
+    assert.equals(3, #requests)
+    assert.equals("cookie_userid=Reader; cookie_usernum=1; cookie_userchecksum=old", requests[1].headers.Cookie)
+    assert.is_nil(requests[2].headers.Cookie)
+    assert.matches("auth_password=test%+pass", requests[2].url)
+    assert.equals("cookie_userid=Reader; cookie_usernum=1234567; cookie_userchecksum=fresh", requests[3].headers.Cookie)
+    assert.equals("cookie_userid=Reader; cookie_usernum=1234567; cookie_userchecksum=fresh",
+      values[SETTING.LIBRARYTHING.SESSION_COOKIE])
+  end)
+
+  it("re-authenticates when a work page says the user is signed out", function()
+    values[SETTING.LIBRARYTHING.SESSION_COOKIE] = "cookie_userid=Reader; cookie_usernum=1; cookie_userchecksum=old"
+    values[SETTING.LIBRARYTHING.PASSWORD_PLAIN] = "test pass"
+    stub(json, "decode", function() return { data = {
+      cookie_userid = "Reader", cookie_usernum = "1234567", cookie_userchecksum = "fresh",
+    } } end)
+    responses[1] = { 200, work_page({ signed_out = true, copy_id = 1 }) }
+    responses[2] = { 200, "{}" }
+    responses[3] = { 200, work_page({ copy_id = 42, collections = { { 7, "Currently reading" } } }) }
+
+    local status, err = api:_findUserBookOnWorkPage("16471009")
+
+    assert.is_nil(err)
+    assert.equals("42", status.id)
+    assert.equals(3, #requests)
+    assert.equals("cookie_userid=Reader; cookie_usernum=1234567; cookie_userchecksum=fresh", requests[3].headers.Cookie)
+  end)
+
+  it("clears saved credentials on logout", function()
+    values[SETTING.LIBRARYTHING.SESSION_COOKIE] = "cookie_userid=Reader; cookie_usernum=1; cookie_userchecksum=abc"
+    values[SETTING.LIBRARYTHING.PASSWORD_ENC] = "ciphertext"
+    values[SETTING.LIBRARYTHING.PASSWORD_PLAIN] = "password"
+
+    api:logout()
+
+    assert.equals("", values[SETTING.LIBRARYTHING.SESSION_COOKIE])
+    assert.equals("", values[SETTING.LIBRARYTHING.PASSWORD_ENC])
+    assert.equals("", values[SETTING.LIBRARYTHING.PASSWORD_PLAIN])
   end)
 
   it("falls back to the work page for a work with no known title, extracted in the subprocess", function()
