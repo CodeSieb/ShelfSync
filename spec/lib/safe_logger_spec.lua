@@ -20,6 +20,16 @@ describe("safe_logger", function()
     assert.matches("POST Body: %[REDACTED%]", output)
   end)
 
+  it("redacts the LibraryThing username/password sign-in password", function()
+    logger.info("GET https://api4.librarything.com/app_authorize.php?auth_username=Reader&auth_password=test+pass")
+    logger.warn("auth_password=", "test+pass")
+
+    local output = table.concat(mocks.LOG, "\n")
+    assert.is_nil(output:find("test+pass", 1, true))
+    assert.matches("app_authorize%.php%?%[REDACTED%]", output)
+    assert.matches("auth_password= %[REDACTED%]", output)
+  end)
+
   it("redacts response markup and encoded note fields", function()
     logger.warn("HTML response", '<input name="authenticity_token" value="csrf-secret">')
     logger.info("payload user_status%5Bbody%5D=private%20journal%20note&page=42")

@@ -108,12 +108,15 @@ function ShelfSyncApp:onDispatcherRegisterActions()
 
   for _prov_idx, provider in ipairs(PROVIDERS) do
     for _action_idx, action in ipairs(ACTIONS) do
-      Dispatcher:registerAction(provider.key .. "_" .. action.snake, {
-        category = "none",
-        event = provider.prefix .. action.suffix,
-        title = _(provider.label .. ": " .. action.title),
-        general = true,
-      })
+      -- Nothing to send for a provider without reading progress (LibraryThing).
+      if action.suffix ~= "UpdateProgress" or provider.provider_class.tracks_progress ~= false then
+        Dispatcher:registerAction(provider.key .. "_" .. action.snake, {
+          category = "none",
+          event = provider.prefix .. action.suffix,
+          title = _(provider.label .. ": " .. action.title),
+          general = true,
+        })
+      end
     end
   end
 end
@@ -418,7 +421,8 @@ function ShelfSyncApp:onShelfSyncUpdateAllProgress()
     local engine = self.engines[provider.key]
     if engine.settings:bookLinked() then
       has_linked_provider = true
-      if engine:isActive() then
+      -- LibraryThing keeps no reading progress, so it has none to update.
+      if engine:isActive() and engine.provider.tracks_progress ~= false then
         table.insert(linked_engines, engine)
       end
     end
@@ -619,9 +623,9 @@ ShelfSync plugin
 v]] .. version .. new_release_str .. [[
 
 
-Synchronizes reading progress, notes, and status to The StoryGraph, Hardcover, Goodreads, and/or Fable.
+Synchronizes reading progress, notes, and status to The StoryGraph, Hardcover, Goodreads, Fable, Pagebound, and/or LibraryThing.
 
-See the StoryGraph, Hardcover, Goodreads, and Fable submenus for service-specific settings.
+See each service's submenu under Providers for service-specific settings.
 
 Project:
 github.com/Lyfts/ShelfSync]],

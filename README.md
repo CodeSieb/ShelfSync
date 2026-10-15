@@ -2,25 +2,28 @@
 
 [![Latest release](https://img.shields.io/github/v/release/Lyfts/ShelfSync?style=for-the-badge&color=orange)](https://github.com/Lyfts/ShelfSync/releases/latest) [![Total downloads](https://img.shields.io/github/downloads/Lyfts/ShelfSync/total?style=for-the-badge&color=blue)](https://github.com/Lyfts/ShelfSync/releases) [![Platform](https://img.shields.io/badge/Platform-KOReader-success?style=for-the-badge&logo=koreader)](https://github.com/koreader/koreader) [![License](https://img.shields.io/github/license/Lyfts/ShelfSync?style=for-the-badge)](LICENSE)
 
-A KOReader plugin to synchronize your reading progress, notes, and status to [The StoryGraph](https://thestorygraph.com), [Hardcover](https://hardcover.app), [Goodreads](https://goodreads.com), [Fable](https://fable.co), and/or [Pagebound](https://pagebound.co). All services can be linked and tracked independently, side by side, from the same install.
+A KOReader plugin to synchronize your reading progress, notes, and status to [The StoryGraph](https://thestorygraph.com), [Hardcover](https://hardcover.app), [Goodreads](https://goodreads.com), [Fable](https://fable.co), [Pagebound](https://pagebound.co), and/or [LibraryThing](https://www.librarything.com). All services can be linked and tracked independently, side by side, from the same install.
 
 > [!CAUTION]
-> **Disclaimer**: StoryGraph and Goodreads sync use unofficial APIs based on session cookies. Hardcover, Fable, and Pagebound sync use their services' official APIs; Pagebound uses the same API as its website. Any integration may break if a service changes its website or API.
+> **Disclaimer**: StoryGraph, Goodreads, and LibraryThing sync use unofficial APIs based on session cookies. Hardcover, Fable, and Pagebound sync use their services' official APIs; Pagebound uses the same API as its website. Any integration may break if a service changes its website or API.
 
 > [!NOTE]
 > **Goodreads limitations**: Goodreads' website doesn't expose a way to read back your current page position, only your shelf (status), so "Jump to linked book position" isn't available and background sync can't detect when your local progress is behind what's on Goodreads — it always pushes forward. Paused/Did Not Finish statuses can be set but aren't reliably read back either. Posting reviews/ratings isn't supported yet.
+
+> [!NOTE]
+> **LibraryThing limitations**: LibraryThing doesn't track reading progress, so nothing is sent while you read. ShelfSync syncs the book's status instead: Currently reading and To read are LibraryThing collections, and a book is Read once its latest reading date has a finished date. Finishing a book in KOReader sets the finished date and moves it from Currently reading to the collection chosen under **LibraryThing > Read books go to** (Your library by default; any of your collections, including your own, e.g. Read but unowned for borrowed books). A book in that collection also counts as Read, unless it's Your library. There's no Paused or Did Not Finish, and no notes. librarything.com is behind Cloudflare, which can answer requests with a browser check that ShelfSync can't complete; when that happens, syncing fails until Cloudflare lets it through again.
 
 ## Installation
 
 1. Download the latest release and extract it to your KOReader `plugins/` folder.
 2. Set up authentication for whichever service(s) you want to use — all are optional and independent.
 
-Rename `shelfsync_config.example.lua` to `shelfsync_config.lua`. Its `storygraph`, `hardcover`, and `goodreads` sections are optional; leave unused sections blank or omit the file. Set up Fable and Pagebound in KOReader. On upgrade, existing `storygraph_config.lua` and `hardcover_config.lua` files are merged automatically.
+Rename `shelfsync_config.example.lua` to `shelfsync_config.lua`. Its `storygraph`, `hardcover`, and `goodreads` sections are optional; leave unused sections blank or omit the file. Sign in to StoryGraph and LibraryThing from KOReader with your account credentials. Fable and Pagebound can also be set up there.
 
 > [!TIP]
-> The StoryGraph and Goodreads cookies below can be grabbed automatically instead of copying them out of devtools by hand:
+> The StoryGraph, Goodreads, and LibraryThing cookies below can be grabbed automatically instead of copying them out of devtools by hand:
 >
-> 1. Log in to StoryGraph and/or Goodreads in a browser on this PC — the script only reads cookies that already exist, it can't log in for you.
+> 1. Log in to StoryGraph, Goodreads, and/or LibraryThing in a browser on this PC — the script only reads cookies that already exist, it can't log in for you.
 > 2. Download `shelfsync-fetch-cookies.zip` from the [latest release](/releases/latest), extract it, and run `fetch-cookies.sh` (macOS/Linux) or `fetch-cookies.bat` (Windows). Needs Python 3; it'll use [uv](https://docs.astral.sh/uv/) if you have it to grab `browser_cookie3` automatically, otherwise `pip install browser_cookie3==0.20.1` first.
 > 3. It writes the cookies straight into `shelfsync_config.lua` — nothing is sent anywhere else. Use `--help` for options like `--browser firefox`.
 >
@@ -35,6 +38,7 @@ Rename `shelfsync_config.example.lua` to `shelfsync_config.lua`. Its `storygraph
 | [Goodreads](#goodreads-authentication) | Browser session cookie, or the optional self-hosted cookie refresher |
 | [Fable](#fable-authentication) | Email and password in KOReader |
 | [Pagebound](#pagebound-authentication) | Email and password in KOReader |
+| [LibraryThing](#librarything-authentication) | Username/password sign-in, or browser session cookies |
 
 ### StoryGraph authentication
 Open **ShelfSync > Providers > StoryGraph > Account (Cookies & Tokens) > Log in** and enter your StoryGraph email and password. The plugin saves the session and remember-me cookies returned by StoryGraph; it does not store your password. Log in again if your session expires.
@@ -82,9 +86,23 @@ Open **ShelfSync > Providers > Pagebound > Account > Log in** and enter your Pag
 > [!TIP]
 > If you usually sign in to Pagebound with **Google or Apple**, reset the password for the email address on your account through Pagebound. You can then log in with that email and password; ShelfSync uses this regular email/password account.
 
+### LibraryThing authentication
+To connect, open **ShelfSync > Providers > LibraryThing > Account > Sign in with LibraryThing** and enter your username and password. ShelfSync saves your session and password so it can sign you back in if the session expires. It encrypts the saved password when your device supports it; otherwise, it is stored unencrypted. **Log out** clears both.
+
+The sign-in method is unofficial and may change. Your password is sent in the sign-in web address over HTTPS, and that address may be recorded in logs.
+
+If you prefer not to enter your password in ShelfSync, use browser cookies instead:
+
+1. Sign in to [librarything.com](https://www.librarything.com) in a browser on your computer.
+2. Run the cookie helper above with `--service librarything` (`fetch-cookies.sh --service librarything` or `fetch-cookies.bat --service librarything`). It writes only those three cookies into the `librarything` section of `shelfsync_config.lua`; copy that file into the plugin's folder on your e-reader. This avoids typing them on an e-reader keyboard.
+   - Or copy them by hand: Developer Tools (F12) -> Application/Storage -> Cookies -> `www.librarything.com`, then enter `cookie_userid=...; cookie_usernum=...; cookie_userchecksum=...` under **ShelfSync > Providers > LibraryThing > Account > Session cookies**, or into the `cookie` field of the `librarything` section in `shelfsync_config.lua`.
+3. Use **Account > Test connection** to check that it works. **Log out** clears the session from ShelfSync.
+
+Linking a book that isn't in your LibraryThing library adds it to **Your library** and **Currently reading**, using the edition LibraryThing picks for the work.
+
 ## Usage
 
-Everything lives under a single **ShelfSync** menu in **Tools > More tools** when a document is active, with a **Providers** sub-menu containing **StoryGraph**, **Hardcover**, **Goodreads**, **Fable**, and **Pagebound**. They work independently and can be used together.
+Everything lives under a single **ShelfSync** menu in **Tools > More tools** when a document is active, with a **Providers** sub-menu containing **StoryGraph**, **Hardcover**, **Goodreads**, **Fable**, **Pagebound**, and **LibraryThing**. They work independently and can be used together.
 
 ### Updating Progress & Notes
 Each menu provides a unified **"Update progress: [XX]%"** item. This opens a powerful dialog where you can:
@@ -95,7 +113,7 @@ Each menu provides a unified **"Update progress: [XX]%"** item. This opens a pow
 ### Linking a Book
 Before updates can be sent, a document needs to be linked to a book on each service you want to sync to.
 - Use **"Link book"** to search by metadata or ISBN. The plugin automatically tries to link the correct edition (e.g. by matching ISBN) — "Change edition" and the other settings below are mostly for changing which specific edition ends up linked, when you want something other than what was auto-selected.
-- Use **"Change edition"** to switch to a different edition (StoryGraph) or select a specific edition (Hardcover). Goodreads, Fable, and Pagebound have no edition-switching concept, so they have no "Change edition" item — linking picks whichever book the search returns.
+- Use **"Change edition"** to switch to a different edition (StoryGraph) or select a specific edition (Hardcover). Goodreads, Fable, Pagebound, and LibraryThing have no edition-switching concept, so they have no "Change edition" item — linking picks whichever book the search returns.
 - Audio editions are filtered out of the search results (StoryGraph, Hardcover).
 - If a book is not currently tracked, the plugin will set its status to Currently Reading.
 - On StoryGraph, if another edition of the book is set as 'Currently Reading' or 'Want to Read' then the plugin will automatically link to that edition, but not change the status. You can use "Change edition" to link to a different edition if needed.
@@ -103,7 +121,7 @@ Before updates can be sent, a document needs to be linked to a book on each serv
 ### Reviews
 With a book open, choose **ShelfSync > Review** to open the review composer. Add a rating, review text, or both, then choose which providers should receive it. Enabled providers where you are signed in and the book is linked are selected by default; unavailable providers show why they cannot receive the review. If submission fails for a provider, the draft stays available so you can retry it.
 
-Ratings range from 0 to 5 in quarter-star steps. Goodreads rounds down to whole stars; Hardcover and Pagebound round down to half stars; StoryGraph and Fable preserve quarter-star ratings. When ShelfSync detects that you finished a book, it offers to open the composer if at least one provider is eligible.
+Ratings range from 0 to 5 in quarter-star steps. Goodreads rounds down to whole stars; Hardcover, LibraryThing, and Pagebound round down to half stars; StoryGraph and Fable preserve quarter-star ratings. When ShelfSync detects that you finished a book, it offers to open the composer if at least one provider is eligible.
 
 ### Automatically Track Progress
 When enabled (per service), the plugin will periodically sync your progress:
@@ -119,7 +137,7 @@ KOReader's gesture manager includes a **ShelfSync: Update progress for all linke
 ## Settings
 
 Each service has its own **Settings** submenu for linking and account options:
-- **Automatically link by provider identifier/ISBN/Title**: Attempt to find matching books automatically when opening a new document, in that priority order — a provider identifier embedded in the book's metadata first, then ISBN, then title+author. Each method can be toggled independently, and all are enabled by default; disable any of them here if you'd rather link books manually. Identifier-based linking is supported for Goodreads (`goodreads:` tag), Hardcover (`hardcover:`/`hardcover-slug:`/`hardcover-edition:` tags), and StoryGraph (`storygraph:`/`storygraph-edition:` tags). Fable and Pagebound currently don't expose matching identifier schemes.
+- **Automatically link by provider identifier/ISBN/Title**: Attempt to find matching books automatically when opening a new document, in that priority order — a provider identifier embedded in the book's metadata first, then ISBN, then title+author. Each method can be toggled independently, and all are enabled by default; disable any of them here if you'd rather link books manually. Identifier-based linking is supported for Goodreads (`goodreads:` tag), Hardcover (`hardcover:`/`hardcover-slug:`/`hardcover-edition:` tags), StoryGraph (`storygraph:`/`storygraph-edition:` tags), and LibraryThing (`librarything:` tag with a work id). Fable and Pagebound currently don't expose matching identifier schemes.
 - **Account**: Cookies/tokens/login for that service.
 
 Everything else — progress tracking settings, "Enable wifi on demand", "Confirm changes to book read status", "Include location info in regular notes", "Verbose logging", and the **"Plugin Updates"** settings (see below) — is shared between all services and lives under **ShelfSync > Settings**, since it applies to the whole plugin rather than one service:
@@ -129,7 +147,7 @@ Everything else — progress tracking settings, "Enable wifi on demand", "Confir
 
 ## Versioning & Mandatory Updates
 
-To prevent data corruption and ensure compatibility with the providers' APIs, the plugin includes a remote versioning system. This applies to the plugin as a whole (StoryGraph, Hardcover, Goodreads, Fable, and Pagebound sync).
+To prevent data corruption and ensure compatibility with the providers' APIs, the plugin includes a remote versioning system. This applies to the plugin as a whole (StoryGraph, Hardcover, Goodreads, Fable, Pagebound, and LibraryThing sync).
 
 - **Automatic Checks**: The plugin periodically checks for mandatory updates via GitHub. If the StoryGraph API changes in a way that breaks older versions, the plugin will automatically disable sync to prevent errors.
 - **Blocking**: When a mandatory update is required, the plugin menus will be greyed out.

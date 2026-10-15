@@ -18,6 +18,7 @@ local util = require("util")
 local Event = require("ui/event")
 local Trapper = require("ui/trapper")
 local UIManager = require("ui/uimanager")
+local InfoMessage = require("ui/widget/infomessage")
 local Notification = require("ui/widget/notification")
 
 local Book = require("shelfsync/lib/common/book")
@@ -236,6 +237,14 @@ function BaseProvider:canPushProgress(_update_type, _filename)
   return true
 end
 
+-- Whether progress `value` (in `update_type`'s unit) has anything to send
+-- for filename's book. A provider that keeps no reading progress
+-- (LibraryThing) only acts on the end of the book, so other progress isn't
+-- sent, queued, or turning Wi-Fi on for.
+function BaseProvider:sendsProgress(_value, _update_type, _filename)
+  return true
+end
+
 -- Keys of `book` that should be deleted (rather than written as nil) from
 -- the sidecar when linking, e.g. a search result that carries no page count.
 function BaseProvider:_deletedKeys(book, keys)
@@ -252,8 +261,14 @@ function BaseProvider:showLinkBookDialog(force_search, link_callback)
   Trapper:wrap(function()
     local search_value, books, err = self:findBookOptions(force_search)
 
+    -- Shown, not just logged: otherwise tapping "Link book" while offline
+    -- (or when the provider blocks the search) seems to do nothing.
     if err then
       logger.err(err)
+      UIManager:show(InfoMessage:new {
+        text = _("Couldn't search " .. self.label .. ": " .. tostring(err)),
+        icon = "notice-warning",
+      })
       return
     end
 
@@ -323,14 +338,20 @@ end
 -- every provider's findBookByIdentifiers only ever reads the field(s) that
 -- belong to it, so passing the full set through unconditionally can't cause
 -- e.g. a StoryGraph slug to be mistaken for a Hardcover one.
+local function hasProviderIdentifier(identifiers)
+  return identifiers.book_slug or identifiers.edition_id or identifiers.goodreads_id
+    or identifiers.storygraph_slug or identifiers.librarything_id
+end
+
 function BaseProvider:linkBookByIdentifier(identifiers)
-  if identifiers.book_slug or identifiers.edition_id or identifiers.goodreads_id or identifiers.storygraph_slug then
+  if hasProviderIdentifier(identifiers) then
     local user_id = self.user:getId()
     local book_lookup = self.api:findBookByIdentifiers({
       book_slug = identifiers.book_slug,
       edition_id = identifiers.edition_id,
       goodreads_id = identifiers.goodreads_id,
       storygraph_slug = identifiers.storygraph_slug,
+      librarything_id = identifiers.librarything_id,
     },
       user_id
     )
@@ -405,12 +426,13 @@ function BaseProvider:tryAutolink(done)
   end
 
   local identifiers = Book:parseIdentifiers(props.identifiers)
-  local should_attempt = ((identifiers.book_slug or identifiers.edition_id or identifiers.goodreads_id or identifiers.storygraph_slug) and self.settings:readSetting(SETTING.SHARED.LINK_BY_IDENTIFIER) ~= false)
+  local should_attempt = (hasProviderIdentifier(identifiers) and self.settings:readSetting(SETTING.SHARED.LINK_BY_IDENTIFIER) ~= false)
     or ((identifiers.isbn_10 or identifiers.isbn_13) and self.settings:readSetting(SETTING.SHARED.LINK_BY_ISBN) ~= false)
     or (props.title and self.settings:readSetting(SETTING.SHARED.LINK_BY_TITLE) ~= false)
   self.settings:debugLog(self.label .. ": tryAutolink - should_attempt=" .. tostring(should_attempt)
     .. " book_slug=" .. tostring(identifiers.book_slug) .. " goodreads_id=" .. tostring(identifiers.goodreads_id)
     .. " storygraph_slug=" .. tostring(identifiers.storygraph_slug)
+    .. " librarything_id=" .. tostring(identifiers.librarything_id)
     .. " isbn_10=" .. tostring(identifiers.isbn_10) .. " isbn_13=" .. tostring(identifiers.isbn_13)
     .. " title=" .. tostring(props.title))
   if should_attempt then

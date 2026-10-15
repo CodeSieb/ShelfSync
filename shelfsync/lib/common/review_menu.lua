@@ -165,6 +165,7 @@ function ReviewMenu:_ratingHelp()
 When submitted, each provider handles the rating as follows:
 - Goodreads: round down to a whole star
 - Hardcover: round down to a half star
+- LibraryThing: round down to a half star
 - Pagebound: round down to a half star
 - StoryGraph and Fable: exact value (quarter-star precision)]]),
   })

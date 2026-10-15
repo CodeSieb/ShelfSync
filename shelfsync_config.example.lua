@@ -11,4 +11,8 @@ return {
   goodreads = {
     cookie = '',
   },
+  -- cookie_userid=...; cookie_usernum=...; cookie_userchecksum=...
+  librarything = {
+    cookie = '',
+  },
 }

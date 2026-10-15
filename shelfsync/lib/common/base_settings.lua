@@ -260,12 +260,13 @@ end
 -- most precise), StoryGraph's is book-level but still first-party, Fable's is
 -- also edition-level but resolved via a heuristic match rather than an
 -- explicit user pick (see fable/provider.lua's linkBook), Pagebound's is
--- book-level, and
+-- book-level, LibraryThing's (only known for a book linked by its work id)
+-- is the edition its express add would pick, and
 -- Goodreads' is scraped off a page it doesn't always successfully fetch (see
 -- the 0-vs-nil handling in pages() below) -- so it's used only as a last
 -- resort. Matches each settings class's sidecar_key (see storygraph/
--- hardcover/goodreads/fable/pagebound settings.lua).
-local PAGE_COUNT_PROVIDERS = { "hardcover", "storygraph", "fable", "pagebound", "goodreads" }
+-- hardcover/goodreads/fable/pagebound/librarything settings.lua).
+local PAGE_COUNT_PROVIDERS = { "hardcover", "storygraph", "fable", "pagebound", "librarything", "goodreads" }
 
 -- Reads a *different* provider's "pages" book setting directly off the
 -- sidecar, bypassing this instance's own sidecar_key. Doesn't fall back to

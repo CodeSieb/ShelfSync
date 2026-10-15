@@ -3,8 +3,8 @@
 # requires-python = ">=3.8"
 # dependencies = ["browser_cookie3==0.20.1"]
 # ///
-"""Fetches StoryGraph and/or Goodreads session cookies from a browser already
-logged in on this PC, and writes them into shelfsync_config.lua -- an
+"""Fetches StoryGraph, Goodreads and/or LibraryThing session cookies from a
+browser already logged in on this PC, and writes them into shelfsync_config.lua -- an
 automated alternative to manually copying cookie values out of devtools.
 
 This only reads cookies that already exist locally (it never logs in on your
@@ -36,6 +36,9 @@ DEFAULT_TEMPLATE = """return {
     token = '',
   },
   goodreads = {
+    cookie = '',
+  },
+  librarything = {
     cookie = '',
   },
 }
@@ -157,6 +160,18 @@ def fetch_goodreads(browser):
     return "; ".join(f"{name}={value}" for name, value in by_name.items())
 
 
+# Only LibraryThing's own session cookies; the rest (analytics, Cloudflare's
+# cf_clearance, ...) aren't needed or used by the plugin.
+LIBRARYTHING_SESSION_COOKIES = ("cookie_userid", "cookie_usernum", "cookie_userchecksum")
+
+
+def fetch_librarything(browser):
+    by_name = {c.name: c.value for c in load_cookiejar(browser, "librarything.com")}
+    if not all(by_name.get(name) for name in LIBRARYTHING_SESSION_COOKIES):
+        return None
+    return "; ".join(f"{name}={by_name[name]}" for name in LIBRARYTHING_SESSION_COOKIES if by_name.get(name))
+
+
 def insert_section(text, section, field, escaped_value):
     # The section doesn't exist yet -- e.g. an older, hand-trimmed config
     # that never filled in this service. Add a fresh section just inside
@@ -227,8 +242,8 @@ def main():
         help="Locally installed browser to read cookies from (default: auto, tries all supported browsers).",
     )
     parser.add_argument(
-        "--service", choices=("storygraph", "goodreads", "both"), default="both",
-        help="Which service's cookies to fetch (default: both).",
+        "--service", choices=("storygraph", "goodreads", "librarything", "both", "all"), default="both",
+        help="Which service's cookies to fetch: both = StoryGraph and Goodreads, all = those and LibraryThing (default: both).",
     )
     parser.add_argument(
         "--config", default=None,
@@ -238,7 +253,10 @@ def main():
     args = parser.parse_args()
 
     config_path = args.config or default_config_path()
-    services = ("storygraph", "goodreads") if args.service == "both" else (args.service,)
+    services = {
+        "both": ("storygraph", "goodreads"),
+        "all": ("storygraph", "goodreads", "librarything"),
+    }.get(args.service, (args.service,))
 
     found = {}
     if "storygraph" in services:
@@ -257,6 +275,14 @@ def main():
         else:
             print("warning: couldn't find any Goodreads cookies -- "
                   "make sure you're logged in to goodreads.com in this browser.", file=sys.stderr)
+
+    if "librarything" in services:
+        cookie = fetch_librarything(args.browser)
+        if cookie:
+            found["librarything"] = {"cookie": cookie}
+        else:
+            print("warning: couldn't find the LibraryThing session cookies (cookie_userid, cookie_usernum, cookie_userchecksum) -- "
+                  "make sure you're logged in to librarything.com in this browser.", file=sys.stderr)
 
     if not found:
         print("Nothing found, nothing written.", file=sys.stderr)

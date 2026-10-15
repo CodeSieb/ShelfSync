@@ -3,6 +3,8 @@
 <!-- Prefix each entry with (feat) or (fix); list features first and fixes last. -->
 
 ## Unreleased
+- (feat) 🌟 Add LibraryThing sync: sign in with a username and password or browser session cookies (which the cookie helper can fetch with `--service librarything`), link books (adding one to your library if needed), sync Currently reading / To read / Read through LibraryThing's collections and reading dates, set the finished date, choose which collection read books go to (Your library by default), and save ratings and reviews. LibraryThing has no reading progress, so none is sent. 🌟
+- (fix) Say why "Link book" couldn't search (e.g. no network), instead of doing nothing (all providers).
 
 ## 1.7.0
 - (feat) 🌟 Keep progress and finished status from KOReader that can't be sent (e.g. with Wi-Fi off) for up to 4 weeks, and send them once the network is back, even after the book is closed or from the file browser. On Goodreads and Fable, progress is only sent within a day. 🌟
