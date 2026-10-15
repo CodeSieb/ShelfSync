@@ -738,6 +738,42 @@ describe("LibraryThing status changes", function()
     assert.equals(os.date("%Y-%m-%d", finished_at), account.copies["9"].rows[1].finished)
   end)
 
+  it("keeps an earlier read when a re-read's queued finish is dated", function()
+    account:copy(9, "16471009", { title = "Oathbringer", collections = { [1] = true },
+      rows = { { started = "2013", finished = "2013" }, { started = "2024-03-01", finished = "2024-03-20" } } })
+    api:rememberWork("16471009", { title = "Oathbringer", copy = "9" })
+    local finished_at = os.time() - 3 * 24 * 3600
+
+    assert.is_true(api:setDateFinished("16471009", finished_at))
+    assert.same({
+      { started = "2013", finished = "2013" },
+      { started = "2024-03-01", finished = "2024-03-20" },
+      { started = "", finished = os.date("%Y-%m-%d", finished_at) },
+    }, account.copies["9"].rows)
+  end)
+
+  it("finishes an open read with a queued finish's date", function()
+    account:copy(9, "16471009", { title = "Oathbringer", collections = { [1] = true },
+      rows = { { started = "2024-03-01", finished = "2024-03-20" }, { started = "2026-09-01", finished = "" } } })
+    api:rememberWork("16471009", { title = "Oathbringer", copy = "9" })
+    local finished_at = os.time() - 3 * 24 * 3600
+
+    assert.is_true(api:setDateFinished("16471009", finished_at))
+    assert.same({
+      { started = "2024-03-01", finished = "2024-03-20" },
+      { started = "2026-09-01", finished = os.date("%Y-%m-%d", finished_at) },
+    }, account.copies["9"].rows)
+  end)
+
+  it("adds a read for a queued finish when there are no reading dates", function()
+    account:copy(9, "16471009", { title = "Oathbringer", collections = { [1] = true }, rows = {} })
+    api:rememberWork("16471009", { title = "Oathbringer", copy = "9" })
+    local finished_at = os.time() - 3 * 24 * 3600
+
+    assert.is_true(api:setDateFinished("16471009", finished_at))
+    assert.same({ { started = "", finished = os.date("%Y-%m-%d", finished_at) } }, account.copies["9"].rows)
+  end)
+
   it("looks the copy up again once it's been deleted, and then has none", function()
     api:rememberWork("16471009", { title = "Oathbringer", copy = "404" })
     local status = api:findUserBook("16471009")

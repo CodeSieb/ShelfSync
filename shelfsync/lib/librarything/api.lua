@@ -1436,7 +1436,9 @@ function LibraryThingApi:updateUserBook(work_id, status_id, finished_at)
 end
 
 -- Dates the work's latest read as finished on `finished_at`, for a finish
--- that was queued while offline and so set as of the day it was sent.
+-- that was queued while offline and so set as of the day it was sent. A
+-- read finished before `finished_at` is an earlier one, e.g. the first read
+-- of a book being re-read, so it's kept and a read finished then is added.
 function LibraryThingApi:setDateFinished(work_id, finished_at)
   local status = self:findUserBook(work_id)
   if not status or not status.id then return false end
@@ -1447,8 +1449,15 @@ function LibraryThingApi:setDateFinished(work_id, finished_at)
 
   local usernum = status.usernum or self:me().id
   local rows = self:_readingDateRows(work_id, status.id, usernum)
-  if not rows or #rows == 0 then return false end
-  rows[#rows].finished = date
+  if not rows then return false end
+  local row = rows[#rows]
+  -- Dates are YYYY-MM-DD, or less precise ("2013", "2013-12"), which sort
+  -- before any day in them, so they're taken for an earlier read too.
+  if row and (row.finished == "" or row.finished > date) then
+    row.finished = date
+  else
+    table.insert(rows, { started = "", finished = date })
+  end
   return self:_saveReadingDateRows(work_id, status.id, usernum, rows) == true
 end
 
