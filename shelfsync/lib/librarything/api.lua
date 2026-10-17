@@ -430,6 +430,14 @@ local function is_sign_in_redirect(location)
     or path:match("^/signup") ~= nil or path:match("^/signoutconfirm") ~= nil
 end
 
+-- A short reason for a failed request: the transport error when nothing
+-- came back, otherwise just the status. Never the response itself, which is
+-- a whole HTML page that would end up in a message on the e-reader.
+local function request_error(code, body)
+  if not code then return body or "Request failed" end
+  return "LibraryThing answered HTTP " .. tostring(code)
+end
+
 -- Sends one request to www.librarything.com and returns its status code,
 -- body and the headers in META_HEADERS, or nil and a reason. Redirects
 -- aren't followed: the cookies only ever go to librarything.com, and the
@@ -441,6 +449,8 @@ end
 --            page doesn't have to be passed back (or kept) to read part of it
 --   base_url/user_agent/accept: override for the Android app sign-in request
 --   no_cookies: don't send or save cookies for that request
+--   no_retry: don't send it again when the first try doesn't complete, as
+--            it may have reached LibraryThing anyway (adding a book twice)
 --   timeout/maxtime: seconds, for LuaSocket
 function LibraryThingApi:request(path, opts, auth_retried)
   opts = opts or {}
@@ -497,8 +507,11 @@ function LibraryThingApi:request(path, opts, auth_retried)
   end
 
   -- Forking can fail to complete on some devices; one retry recovers most.
+  -- An incomplete try can also be one the user dismissed, or one whose
+  -- request was sent before it failed, so requests that change something
+  -- that can't be changed twice opt out.
   local completed, content
-  for attempt = 1, 2 do
+  for attempt = 1, opts.no_retry and 1 or 2 do
     completed, content = Trapper:dismissableRunInSubprocess(subprocess_fn, true, true)
     if completed then break end
     if self.settings and attempt == 1 then
@@ -790,7 +803,7 @@ function LibraryThingApi:_copyCollections(copy_id)
       { "is_ajax", 1 },
     },
   })
-  if code ~= 200 then return nil, body or ("HTTP " .. tostring(code)) end
+  if code ~= 200 then return nil, request_error(code, body) end
 
   local all = parse_collections_popup(body)
   if #all == 0 then
@@ -1085,7 +1098,7 @@ function LibraryThingApi:_addForm(work_id)
     ajax = true,
     form = { { "workcode", work_id }, { "forceLT2", 1 }, { "is_lightbox_request", 1 }, { "is_ajax", 1 } },
   })
-  if code ~= 200 then return nil, form_html or ("HTTP " .. tostring(code)) end
+  if code ~= 200 then return nil, request_error(code, form_html) end
 
   local collections = parse_collection_checkboxes(form_html)
   if #collections == 0 then
@@ -1134,7 +1147,7 @@ function LibraryThingApi:setCollection(copy_id, collection_id, add)
     },
   })
   if code ~= 200 then
-    return nil, body or ("HTTP " .. tostring(code))
+    return nil, request_error(code, body)
   end
   local now_in = false
   for _, collection in ipairs(parse_toggle_response(body)) do
@@ -1175,7 +1188,7 @@ function LibraryThingApi:_bestEdition(work_id)
     ajax = true,
     form = { { "fancy_type[#abx_data_info]", "full" }, { "forceLT2", 1 }, { "is_ajax", 1 } },
   })
-  if code ~= 200 then return nil, edition_json or ("HTTP " .. tostring(code)) end
+  if code ~= 200 then return nil, request_error(code, edition_json) end
   return json_unescape(edition_json or "")
 end
 
@@ -1201,7 +1214,7 @@ function LibraryThingApi:_recentlyAddedCopy(work_id)
     form = { { "fragment", 1 }, { "limit", 5 }, { "forceLT2", 1 }, { "is_ajax", 1 } },
     extract = extract_copy_links,
   })
-  if code ~= 200 then return nil, links or ("HTTP " .. tostring(code)) end
+  if code ~= 200 then return nil, request_error(code, links) end
   return copy_in_links(links, work_id)
 end
 
@@ -1228,10 +1241,11 @@ function LibraryThingApi:_addWork(work_id, collection_ids)
   }
   local add_code, result = self:request("/action_addbooks_express_add_book.php?" .. form_encode(query), {
     method = "POST",
+    no_retry = true,
     ajax = true,
     form = { { "forceLT2", 1 }, { "is_ajax", 1 } },
   })
-  if add_code ~= 200 then return nil, result or ("HTTP " .. tostring(add_code)) end
+  if add_code ~= 200 then return nil, request_error(add_code, result) end
   if not html_text(result):match("^Added") then
     logger.warn("LibraryThing: express add was refused")
     return nil, "LibraryThing couldn't add the book to your library"
@@ -1259,7 +1273,7 @@ function LibraryThingApi:_readingDateRows(work_id, copy_id, usernum)
     ajax = true,
     form = { { "forceLT2", 1 }, { "is_lightbox_request", 1 }, { "is_ajax", 1 } },
   })
-  if code ~= 200 then return nil, body or ("HTTP " .. tostring(code)) end
+  if code ~= 200 then return nil, request_error(code, body) end
   if not body:find("edit_type", 1, true) then
     return nil, "LibraryThing's reading dates couldn't be read"
   end
@@ -1297,8 +1311,9 @@ function LibraryThingApi:_saveReadingDateRows(work_id, copy_id, usernum, rows)
   table.insert(form, { "newdateendedA[0]", "" })
 
   local code, body = self:request("/ajax_newwork_edit_bookfields_submit.php", { ajax = true, form = form })
-  if code ~= 200 or not (body or ""):find("edit_field_reading_dates", 1, true) then
-    return nil, body or ("HTTP " .. tostring(code))
+  if code ~= 200 then return nil, request_error(code, body) end
+  if not (body or ""):find("edit_field_reading_dates", 1, true) then
+    return nil, "LibraryThing didn't save the reading dates"
   end
   return true
 end
@@ -1421,7 +1436,9 @@ function LibraryThingApi:updateUserBook(work_id, status_id, finished_at)
 end
 
 -- Dates the work's latest read as finished on `finished_at`, for a finish
--- that was queued while offline and so set as of the day it was sent.
+-- that was queued while offline and so set as of the day it was sent. A
+-- read finished before `finished_at` is an earlier one, e.g. the first read
+-- of a book being re-read, so it's kept and a read finished then is added.
 function LibraryThingApi:setDateFinished(work_id, finished_at)
   local status = self:findUserBook(work_id)
   if not status or not status.id then return false end
@@ -1432,8 +1449,15 @@ function LibraryThingApi:setDateFinished(work_id, finished_at)
 
   local usernum = status.usernum or self:me().id
   local rows = self:_readingDateRows(work_id, status.id, usernum)
-  if not rows or #rows == 0 then return false end
-  rows[#rows].finished = date
+  if not rows then return false end
+  local row = rows[#rows]
+  -- Dates are YYYY-MM-DD, or less precise ("2013", "2013-12"), which sort
+  -- before any day in them, so they're taken for an earlier read too.
+  if row and (row.finished == "" or row.finished > date) then
+    row.finished = date
+  else
+    table.insert(rows, { started = "", finished = date })
+  end
   return self:_saveReadingDateRows(work_id, status.id, usernum, rows) == true
 end
 
@@ -1470,7 +1494,7 @@ function LibraryThingApi:setRating(copy_id, rating)
       { "is_addbooksB", 0 },
     },
   })
-  if code ~= 200 then return nil, body or ("HTTP " .. tostring(code)) end
+  if code ~= 200 then return nil, request_error(code, body) end
   return true
 end
 
@@ -1484,7 +1508,7 @@ function LibraryThingApi:setReview(status, text, rating)
     ajax = true,
     form = { { "forceLT2", 1 }, { "is_lightbox_request", 1 }, { "is_ajax", 1 } },
   })
-  if code ~= 200 then return nil, form_html or ("HTTP " .. tostring(code)) end
+  if code ~= 200 then return nil, request_error(code, form_html) end
 
   local language = form_html:match('<select[^>]*name="form_review_language".-<option[^>]*value="(%a+)"[^>]*selected')
     or input_value(form_html, "language") or "eng"
@@ -1501,8 +1525,9 @@ function LibraryThingApi:setReview(status, text, rating)
       { "language", language },
     },
   })
-  if submit_code ~= 200 or not (body or ""):find("edit_field_review", 1, true) then
-    return nil, body or ("HTTP " .. tostring(submit_code))
+  if submit_code ~= 200 then return nil, request_error(submit_code, body) end
+  if not (body or ""):find("edit_field_review", 1, true) then
+    return nil, "LibraryThing didn't save the review"
   end
   return true
 end

@@ -186,11 +186,12 @@ describe("LibraryThing parsing", function()
 end)
 
 describe("LibraryThing transport", function()
-  local api, values, requests, responses
+  local api, values, requests, responses, incomplete_tries
 
   before_each(function()
     mocks.reset()
     values = {}
+    incomplete_tries = nil
     api = setmetatable({
       settings = {
         readSetting = function(_, key) return values[key] end,
@@ -201,7 +202,14 @@ describe("LibraryThing transport", function()
     }, { __index = Api })
     requests, responses = {}, {}
     stub(NetworkManager, "isConnected", function() return true end)
-    stub(Trapper, "dismissableRunInSubprocess", function(_, fn) return true, fn() end)
+    stub(Trapper, "dismissableRunInSubprocess", function(_, fn)
+      -- As when the user dismisses it, or the subprocess dies.
+      if incomplete_tries then
+        incomplete_tries = incomplete_tries + 1
+        return false
+      end
+      return true, fn()
+    end)
     stub(socketutil, "set_timeout", function() end)
     stub(socketutil, "reset_timeout", function() end)
     stub(socketutil, "table_sink", function(t)
@@ -418,6 +426,28 @@ describe("LibraryThing transport", function()
     assert.equals("", values[SETTING.LIBRARYTHING.PASSWORD_PLAIN])
   end)
 
+  it("doesn't send a request that opts out again after an incomplete try", function()
+    values[SETTING.LIBRARYTHING.SESSION_COOKIE] = "cookie_userid=Reader; cookie_usernum=1; cookie_userchecksum=abc"
+    incomplete_tries = 0
+    local code, err = api:request("/action_addbooks_express_add_book.php?workcode=1",
+      { method = "POST", ajax = true, no_retry = true })
+    assert.is_nil(code)
+    assert.equals("Request failed", err)
+    assert.equals(1, incomplete_tries)
+
+    -- Others are still tried twice.
+    api:request("/ajax_collections_popup.php", { ajax = true, form = { { "bookid", 1 } } })
+    assert.equals(3, incomplete_tries)
+  end)
+
+  it("reports a failed request by its status, not the page it got back", function()
+    values[SETTING.LIBRARYTHING.SESSION_COOKIE] = "cookie_userid=Reader; cookie_usernum=1; cookie_userchecksum=abc"
+    responses[1] = { 500, "<!DOCTYPE html><html><body><h1>Something went wrong</h1></body></html>" }
+    local ok, err = api:setRating("9", 7)
+    assert.is_nil(ok)
+    assert.equals("LibraryThing answered HTTP 500", err)
+  end)
+
   it("falls back to the work page for a work with no known title, extracted in the subprocess", function()
     values[SETTING.LIBRARYTHING.SESSION_COOKIE] = "cookie_userid=Reader; cookie_usernum=1; cookie_userchecksum=abc"
     responses[1] = { 200, work_page({ copy_id = 42, collections = { { 7, "Currently reading" } }, reads = { { "2026-10-01" } } }) }
@@ -471,7 +501,7 @@ local function fake_account()
     opts = opts or {}
     local form = {}
     for _, field in ipairs(opts.form or {}) do form[field[1]] = field[2] end
-    table.insert(self.calls, { path = path, form = form, fields = opts.form })
+    table.insert(self.calls, { path = path, form = form, fields = opts.form, opts = opts })
     local params = query(path)
     local function reply(body) return 200, opts.extract and opts.extract(body) or body, {} end
 
@@ -620,6 +650,7 @@ describe("LibraryThing status changes", function()
     assert.matches("collection=1%%2C7", add)
     assert.matches("record_id=272878834", add, 1, true)
     assert.matches("workcode=8556314", add, 1, true)
+    assert.is_true(called("^/action_addbooks_express_add_book").opts.no_retry)
     assert.same({ { started = today, finished = "" } }, account.copies["77"].rows)
     assert.equals("77", values[SETTING.LIBRARYTHING.WORKS]["8556314"].copy)
     assert.same({ library = 1, reading = 7, to_read = 3, read_unowned = 5 }, values[SETTING.LIBRARYTHING.COLLECTION_IDS])
@@ -707,6 +738,42 @@ describe("LibraryThing status changes", function()
     assert.equals(os.date("%Y-%m-%d", finished_at), account.copies["9"].rows[1].finished)
   end)
 
+  it("keeps an earlier read when a re-read's queued finish is dated", function()
+    account:copy(9, "16471009", { title = "Oathbringer", collections = { [1] = true },
+      rows = { { started = "2013", finished = "2013" }, { started = "2024-03-01", finished = "2024-03-20" } } })
+    api:rememberWork("16471009", { title = "Oathbringer", copy = "9" })
+    local finished_at = os.time() - 3 * 24 * 3600
+
+    assert.is_true(api:setDateFinished("16471009", finished_at))
+    assert.same({
+      { started = "2013", finished = "2013" },
+      { started = "2024-03-01", finished = "2024-03-20" },
+      { started = "", finished = os.date("%Y-%m-%d", finished_at) },
+    }, account.copies["9"].rows)
+  end)
+
+  it("finishes an open read with a queued finish's date", function()
+    account:copy(9, "16471009", { title = "Oathbringer", collections = { [1] = true },
+      rows = { { started = "2024-03-01", finished = "2024-03-20" }, { started = "2026-09-01", finished = "" } } })
+    api:rememberWork("16471009", { title = "Oathbringer", copy = "9" })
+    local finished_at = os.time() - 3 * 24 * 3600
+
+    assert.is_true(api:setDateFinished("16471009", finished_at))
+    assert.same({
+      { started = "2024-03-01", finished = "2024-03-20" },
+      { started = "2026-09-01", finished = os.date("%Y-%m-%d", finished_at) },
+    }, account.copies["9"].rows)
+  end)
+
+  it("adds a read for a queued finish when there are no reading dates", function()
+    account:copy(9, "16471009", { title = "Oathbringer", collections = { [1] = true }, rows = {} })
+    api:rememberWork("16471009", { title = "Oathbringer", copy = "9" })
+    local finished_at = os.time() - 3 * 24 * 3600
+
+    assert.is_true(api:setDateFinished("16471009", finished_at))
+    assert.same({ { started = "", finished = os.date("%Y-%m-%d", finished_at) } }, account.copies["9"].rows)
+  end)
+
   it("looks the copy up again once it's been deleted, and then has none", function()
     api:rememberWork("16471009", { title = "Oathbringer", copy = "404" })
     local status = api:findUserBook("16471009")
@@ -725,6 +792,22 @@ describe("LibraryThing status changes", function()
     assert.is_nil(status)
     assert.equals("Unauthorized", err)
     assert.equals("9", values[SETTING.LIBRARYTHING.WORKS]["16471009"].copy)
+  end)
+
+  it("says the reading dates weren't saved, rather than showing what LibraryThing answered", function()
+    account:copy(9, "16471009", { title = "Oathbringer", collections = { [1] = true, [7] = true },
+      rows = { { started = "2026-09-01", finished = "" } } })
+    api:rememberWork("16471009", { title = "Oathbringer", copy = "9" })
+    api.request = function(_, path, opts)
+      if path == "/ajax_newwork_edit_bookfields_submit.php" then
+        return 200, "<!DOCTYPE html><html><body>Something went wrong</body></html>", {}
+      end
+      return account:request(path, opts)
+    end
+
+    local status, err = api:updateUserBook("16471009", STATUS.FINISHED)
+    assert.is_nil(status)
+    assert.equals("LibraryThing didn't save the reading dates", err)
   end)
 
   it("removes the status but keeps the copy in the library", function()
