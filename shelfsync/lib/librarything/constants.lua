@@ -36,6 +36,17 @@ local LibraryThing = {
     read_unowned = "read but unowned",
     reading = "currently reading",
   },
+  -- Book sources offered for books that aren't on LibraryThing yet (its
+  -- "Add books" search), by LibraryThing's source id. Amazon.com is the
+  -- site's own default; the rest are national and union catalogues.
+  ADD_SOURCES = {
+    { id = 1197, name = "Amazon.com books" },
+    { id = 1187, name = "Amazon UK books" },
+    { id = 1, name = "Library of Congress" },
+    { id = 1161, name = "Overcat" },
+    { id = 1065, name = "Vlaamse Centrale Catalogus" },
+    { id = 753, name = "LIBIS-Net (Belgium)" },
+  },
   -- Every account's default collections, as LibraryThing lists them.
   DEFAULT_COLLECTIONS = {
     { id = 1, name = "Your library" },

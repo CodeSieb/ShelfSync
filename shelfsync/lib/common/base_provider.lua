@@ -384,7 +384,7 @@ function BaseProvider:linkBookByTitle()
     return
   end
 
-  local results = self.api:findBooks(props.title, props.authors, self.user:getId())
+  local results = self.api:findBooks(props.title, props.authors, self.user:getId(), { autolink = true })
   local best_match, best_score
   for _, result in ipairs(results or {}) do
     local score = titleAuthorMatchScore(props, result)

@@ -152,6 +152,16 @@ function LibraryThingMenu:getSubMenuItems(book_view)
       end,
     },
     {
+      text_func = function()
+        local source = self.api:addSource()
+        return T(_("Books not on LibraryThing: %1"), source and source.name or _("don't search"))
+      end,
+      help_text = _("When \"Link book\" finds no LibraryThing work, it searches this book source instead, as LibraryThing's \"Add books\" page does. Picking a result adds that edition to your library, which puts the book on LibraryThing."),
+      sub_item_table_func = function()
+        return self:getAddSourceItems()
+      end,
+    },
+    {
       text = _("Account"),
       sub_item_table_func = function()
         return self:getAuthSubMenuItems()
@@ -227,6 +237,37 @@ function LibraryThingMenu:getStatusSubMenuItems()
       keep_menu_open = true,
     },
   }
+end
+
+-- The book sources "Link book" can search for a book that isn't a
+-- LibraryThing work yet, or none.
+function LibraryThingMenu:getAddSourceItems()
+  local items = {}
+  for _, source in ipairs(LIBRARYTHING.ADD_SOURCES) do
+    table.insert(items, {
+      text = source.name,
+      radio = true,
+      checked_func = function()
+        local chosen = self.api:addSource()
+        return chosen ~= nil and chosen.id == source.id
+      end,
+      callback = function()
+        self.api:setAddSource(source)
+      end,
+    })
+  end
+  items[#items].separator = true
+  table.insert(items, {
+    text = _("Don't search other sources"),
+    radio = true,
+    checked_func = function()
+      return self.api:addSource() == nil
+    end,
+    callback = function()
+      self.api:setAddSource(false)
+    end,
+  })
+  return items
 end
 
 -- The account's collections a read book can go to: any but Currently
