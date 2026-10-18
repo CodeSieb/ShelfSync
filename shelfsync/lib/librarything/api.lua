@@ -621,7 +621,10 @@ function LibraryThingApi:searchWorks(query)
   return parse_search_results(html)
 end
 
-function LibraryThingApi:findBooks(title, author, _user_id)
+-- `opts.autolink`: linking a book on its own (by title) only picks a work
+-- that's already on LibraryThing, never an edition from a book source,
+-- which adding would put in the library unasked.
+function LibraryThingApi:findBooks(title, author, _user_id, opts)
   local query = title or ""
   -- Metadata authors can be "Last, First" or several names; the first one
   -- is enough to narrow the search.
@@ -634,6 +637,15 @@ function LibraryThingApi:findBooks(title, author, _user_id)
   -- The author can be spelled differently there; fall back to the title.
   if #books == 0 and first_author and title and title ~= "" then
     books, err = self:searchWorks(title)
+    if err then return nil, err end
+  end
+  -- Not a work on LibraryThing yet (no member has added it): offer the
+  -- editions the chosen book source has, as the "Add books" page does.
+  if #books == 0 and not (opts and opts.autolink) and self:addSource() then
+    books, err = self:searchSource(query)
+    if not err and #books == 0 and first_author and title and title ~= "" then
+      books, err = self:searchSource(title)
+    end
     if err then return nil, err end
   end
   return books
@@ -991,6 +1003,183 @@ function LibraryThingApi:_findUserBookOnWorkPage(work_id)
     self:notifyAuthFailure()
   end
   return status, err
+end
+
+----------------------------------------------------------------------
+-- Book sources ("Add books")
+----------------------------------------------------------------------
+
+-- The book source searched for books that aren't on LibraryThing yet,
+-- { id, name }, or nil if that's turned off.
+function LibraryThingApi:addSource()
+  local chosen = self.settings and self.settings:readSetting(SETTING.LIBRARYTHING.ADD_SOURCE)
+  if chosen == false then return nil end
+  if type(chosen) == "table" and tonumber(chosen.id) then
+    return { id = tonumber(chosen.id), name = chosen.name }
+  end
+  return LIBRARYTHING.ADD_SOURCES[1]
+end
+
+-- `source` is { id, name }, or false to not search any.
+function LibraryThingApi:setAddSource(source)
+  self.settings:updateSetting(SETTING.LIBRARYTHING.ADD_SOURCE,
+    source and { id = source.id, name = source.name } or false)
+end
+
+-- Each result's record (the edition's catalogue data, as JSON in its
+-- data-record attribute), one per line, so the ~100 KB of result HTML
+-- needn't come back from the subprocess.
+local function extract_source_records(html)
+  -- Only result rows carry a data-record; its quotes are escaped, so it ends
+  -- at the next one (unlike the tag, as the JSON can hold a ">").
+  local records = {}
+  for record in html:gmatch('data%-record="([^"]*)"') do
+    table.insert(records, record)
+  end
+  return table.concat(records, "\n")
+end
+
+local function json_value(value)
+  -- JSON null, however the decoder represents it.
+  if value == nil or (json.null and value == json.null) or type(value) == "function" or type(value) == "userdata" then
+    return nil
+  end
+  return value
+end
+
+-- "Yarros, Rebecca" -> "Rebecca Yarros", as the work search shows authors.
+local function unflip(name)
+  local last, first = (name or ""):match("^%s*([^,]+),%s*(.-)%s*$")
+  if last and first ~= "" then return first .. " " .. last end
+  return name
+end
+
+-- An edition from a book source, as a search result. Its id isn't a work
+-- (there isn't one yet), but a key to the record kept to add it.
+local function source_book(id, record, source)
+  local text = function(key)
+    local value = json_value(record[key])
+    return type(value) ~= "table" and value ~= nil and tostring(value) or nil
+  end
+  local author = text("books_author")
+  local pages = tonumber(text("books_pages") or "")
+  return {
+    id = id,
+    book_id = id,
+    title = decode_entities(text("books_title") or ""),
+    contributions = author and { { author = { name = decode_entities(unflip(author)) } } } or {},
+    isbn = text("books_ISBN"),
+    pub_date = text("books_date"),
+    publisher = decode_entities(text("books_publication") or text("publisher_place") or ""),
+    edition_format = source.name,
+    pages = pages,
+    page_count = pages,
+  }
+end
+
+-- Editions matching `query` in the chosen book source, as search results.
+-- Picking one adds it (see addSourceEdition), which creates its work.
+function LibraryThingApi:searchSource(query)
+  local source = self:addSource()
+  query = (query or ""):gsub("%s+", " "):match("^%s*(.-)%s*$")
+  if not source or query == "" then return {} end
+
+  local code, records = self:request("/response_search_beta_lt2.php", {
+    ajax = true,
+    form = {
+      { "form_find", query },
+      { "new_search", 1 },
+      { "form_tags", "" },
+      { "books_collections[]", self:collectionId(COLLECTION.LIBRARY) },
+      { "libraryChoice", source.id },
+      { "forceLT2", 1 },
+      { "is_ajax", 1 },
+    },
+    extract = extract_source_records,
+  })
+  if not code then return {}, records end
+  if code ~= 200 then return {}, request_error(code, records) end
+
+  self.source_records = {}
+  local books = {}
+  for raw in (records or ""):gmatch("[^\n]+") do
+    local ok, record = pcall(json.decode, decode_entities(raw))
+    if ok and type(record) == "table" and json_value(record.books_title) then
+      local id = "source:" .. (#books + 1)
+      self.source_records[id] = record
+      table.insert(books, source_book(id, record, source))
+      if #books >= 20 then break end
+    end
+  end
+  return books
+end
+
+function LibraryThingApi:isSourceEdition(book_id)
+  return type(book_id) == "string" and book_id:match("^source:") ~= nil
+end
+
+-- The record as the "Add books" page posts it: jQuery's encoding of nested
+-- objects and arrays (a[0][b]=..., a[]=...), with nulls left out.
+local function append_record_fields(fields, prefix, value)
+  value = json_value(value)
+  if value == nil then return end
+  if type(value) == "table" then
+    if #value > 0 then
+      for i, item in ipairs(value) do
+        if type(item) == "table" then
+          append_record_fields(fields, prefix .. "[" .. (i - 1) .. "]", item)
+        else
+          append_record_fields(fields, prefix .. "[]", item)
+        end
+      end
+    else
+      local keys = {}
+      for key in pairs(value) do table.insert(keys, key) end
+      table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+      for _, key in ipairs(keys) do
+        local name = prefix and (prefix .. "[" .. tostring(key) .. "]") or tostring(key)
+        append_record_fields(fields, name, value[key])
+      end
+    end
+  elseif type(value) == "number" and value == math.floor(value) then
+    table.insert(fields, { prefix, string.format("%d", value) })
+  else
+    table.insert(fields, { prefix, tostring(value) })
+  end
+end
+
+-- Adds an edition found by searchSource to the library, in the collections
+-- with the given ids, as the "Add books" page does, which creates its work.
+-- Returns the work's and the new copy's ids.
+function LibraryThingApi:addSourceEdition(book_id, collection_ids)
+  local record = self.source_records and self.source_records[book_id]
+  if not record then return nil, "Search for the book again" end
+
+  local form = {}
+  append_record_fields(form, nil, record)
+  table.insert(form, { "form_tags", "" })
+  for _, id in ipairs(collection_ids) do
+    table.insert(form, { "books_collections[]", id })
+  end
+  table.insert(form, { "forceLT2", 1 })
+  table.insert(form, { "is_ajax", 1 })
+
+  -- Not sent twice: an interrupted try may have added it already.
+  local code, links = self:request("/addbook_regular.php", {
+    ajax = true,
+    no_retry = true,
+    form = form,
+    extract = extract_copy_links,
+  })
+  if code ~= 200 then return nil, request_error(code, links) end
+  local work_id, copy_id = (links or ""):match("(%d+)/book/(%d+)")
+  if not work_id then
+    logger.warn("LibraryThing: adding an edition from a book source was refused")
+    return nil, "LibraryThing couldn't add the book to your library"
+  end
+  self.source_records[book_id] = nil
+  self:rememberWork(work_id, { copy = copy_id })
+  return work_id, copy_id
 end
 
 ----------------------------------------------------------------------
@@ -1551,6 +1740,8 @@ LibraryThingApi._parse = {
   extract_work_page = extract_work_page,
   encode_response = encode_response,
   decode_response = decode_response,
+  extract_source_records = extract_source_records,
+  append_record_fields = append_record_fields,
 }
 
 return LibraryThingApi

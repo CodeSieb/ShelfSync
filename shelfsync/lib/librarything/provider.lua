@@ -24,6 +24,23 @@ LibraryThing.__index = LibraryThing
 function LibraryThing:linkBook(book, link_method)
   local filename = self.ui.document.file
 
+  -- An edition from a book source (see api.lua's searchSource) isn't a work
+  -- on LibraryThing yet: adding it to the library makes one, which is then
+  -- linked as usual (and set to Currently reading below).
+  if self.api:isSourceEdition(book.book_id) then
+    local work_id, err = self.api:addSourceEdition(book.book_id,
+      { self.api:collectionId(LIBRARYTHING.COLLECTION.LIBRARY) })
+    if not work_id then
+      logger.warn("LibraryThing: Couldn't add the edition from the book source: " .. tostring(err))
+      UIManager:show(InfoMessage:new {
+        text = _("Couldn't add the book to LibraryThing: ") .. tostring(err),
+        icon = "notice-warning",
+      })
+      return false
+    end
+    book.book_id = work_id
+  end
+
   -- What the user's copy is looked up by in their catalog.
   local author = book.contributions and book.contributions[1] and book.contributions[1].author
   self.api:rememberWork(book.book_id, {

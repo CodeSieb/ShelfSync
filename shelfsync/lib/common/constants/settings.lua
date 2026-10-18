@@ -117,6 +117,9 @@ Settings.LIBRARYTHING = {
   -- LibraryThing's own site session (LTAnonSessionID), which it sets on
   -- any visitor and its search needs.
   SITE_SESSION = "site_session",
+  -- { id, name } of the book source ("Add books" search) used for books
+  -- that aren't a LibraryThing work yet; false to not search one.
+  ADD_SOURCE = "add_source",
 }
 
 return Settings
