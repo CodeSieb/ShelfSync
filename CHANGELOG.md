@@ -3,7 +3,9 @@
 <!-- Prefix each entry with (feat) or (fix); list features first and fixes last. -->
 
 ## Unreleased
+- (feat) Send Goodreads ratings in quarter stars, now that Goodreads takes them, instead of rounding down to whole stars.
 - (feat) LibraryThing: when "Link book" finds no work (e.g. a new translation no member has added yet), search a book source such as the Vlaamse Centrale Catalogus or Amazon, and add the picked edition to create it.
+- (fix) Don't ask to mark a book that's Read on LibraryThing as reading again when it's opened at its end; LibraryThing has no reading progress to sync.
 
 ## 1.8.0
 - (feat) 🌟 Add LibraryThing sync: sign in with a username and password or browser session cookies (which the cookie helper can fetch with `--service librarything`), link books (adding one to your library if needed), sync Currently reading / To read / Read through LibraryThing's collections and reading dates, set the finished date (a re-read gets reading dates of its own, keeping the earlier ones), choose which collection read books go to (Your library by default), and save ratings and reviews. LibraryThing has no reading progress, so none is sent. 🌟
